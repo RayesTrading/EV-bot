@@ -21,11 +21,11 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); layout.setPadding(28,28,28,28);
         scroll.addView(layout); setContentView(scroll);
-        title("Adventure Oracle Bot — Diagnostic Test 0.3");
-        note("TCL 10 Pro testing. This version taps one configured position only. It cannot yet identify stations, finish cities or play Adventures automatically.");
+        title("Adventure Oracle Bot — Vision Beta 0.4");
+        note("TCL 10 Pro testing. Vision beta uses on-device text recognition to attempt station unlocking, upgrading and renovation. It is experimental: supervise it and use STOP if it misidentifies a screen.");
         pkg = field("Eatventure package name", prefs.getString("package", "com.hwqgrhhjfd.idlefastfood"));
-        x = field("Tap X (% of screen width, 0–100)", String.valueOf(prefs.getInt("x",50)));
-        y = field("Tap Y (% of screen height, 0–100)", String.valueOf(prefs.getInt("y",75)));
+        x = field("Fallback tap X (% of screen width, 0–100)", String.valueOf(prefs.getInt("x",50)));
+        y = field("Fallback tap Y (% of screen height, 0–100)", String.valueOf(prefs.getInt("y",75)));
         interval = field("Interval between taps (milliseconds, 500–10000)", String.valueOf(prefs.getInt("interval",1500)));
         limit = field("Maximum taps per session (1–500)", String.valueOf(prefs.getInt("limit",5)));
         button("1. Enable Accessibility Service", () -> { BotLog.write(this,"INFO","Opening Accessibility settings"); startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); });
@@ -34,7 +34,7 @@ public class MainActivity extends Activity {
             if (!save()) return;
             if (TapService.instance == null) { showStatus("ERROR: Accessibility Service is not connected. Open Android Accessibility settings, enable Adventure Oracle Bot, then return."); BotLog.write(this,"ERROR","Start rejected: service not connected"); return; }
             TapService.instance.start();
-            showStatus("Started. Switch to Eatventure. If no taps occur, return and read the diagnostic report.");
+            showStatus("Vision beta started. Switch to Eatventure. Monitor it closely; return to stop.");
         });
         button("STOP BOT", () -> { if (TapService.instance != null) TapService.instance.stop("Stopped from app"); showStatus("Stopped by user."); });
         status = new TextView(this); status.setTextSize(16); status.setPadding(0,16,0,16); layout.addView(status);
@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
         button("Share full debug report", this::shareLog);
         button("Copy report text", () -> { android.content.ClipboardManager cb = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE); cb.setPrimaryClip(android.content.ClipData.newPlainText("Adventure Oracle debug", BotLog.read(this))); Toast.makeText(this,"Copied",Toast.LENGTH_SHORT).show(); });
         diagnostics = new TextView(this); diagnostics.setTextSize(12); diagnostics.setTextIsSelectable(true); diagnostics.setPadding(0,16,0,16); layout.addView(diagnostics);
-        note("Safety: Test only on a harmless upgrade control, with 5 taps at 1500 ms. Avoid premium purchases, ads, and account controls. Returning to this app stops the bot.");
+        note("Safety: vision beta only acts on recognized game text. Avoid premium purchases, ads, and account controls. Returning to this app stops the bot. Increase the tap limit only after supervised testing.");
         refreshDiagnostics();
     }
     private void title(String s) { TextView t = new TextView(this); t.setText(s); t.setTextSize(22); t.setPadding(0,8,0,16); layout.addView(t); }

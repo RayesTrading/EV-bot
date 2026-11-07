@@ -1,6 +1,7 @@
 plugins { id 'com.android.application' }
 android { namespace 'com.adventureoracle.bot'; compileSdk 35
-    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 3; versionName '0.3' }
+    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 4; versionName '0.4-beta' }
 }
 
-dependencies { implementation "androidx.core:core:1.12.0" }
+dependencies { implementation "androidx.core:core:1.12.0"
+    implementation "com.google.mlkit:text-recognition:16.0.1" }
