@@ -1,0 +1,6 @@
+plugins { id 'com.android.application' }
+android { namespace 'com.adventureoracle.bot'; compileSdk 35
+    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 3; versionName '0.3' }
+}
+
+dependencies { implementation "androidx.core:core:1.12.0" }
