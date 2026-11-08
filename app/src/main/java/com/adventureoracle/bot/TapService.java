@@ -25,7 +25,7 @@ import java.util.concurrent.Executor;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** v0.8 experimental strategy engine. All gestures are gated by foreground game and screenshot state. */
+/** v0.9 experimental navigation engine. All gestures are gated by foreground game and screenshot state. */
 public class TapService extends AccessibilityService {
     public static TapService instance;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -47,13 +47,16 @@ public class TapService extends AccessibilityService {
     private int currentStation=-1, lastStation=-1, stationVisits=0, maxSeen=0, upgradeRound=0, noAffordable=0;
     private boolean preferMain=false, mainMenuAttempted=false, stationMax=false;
     private long lastMenuAttempt=0;
+    private int menuPurchases=0, menuScrolls=0, arrowFailures=0;
+    private long lastArrowAttempt=0;
+    private String lastMenuFirst="";
     private int strategy(){return prefs().getInt("strategy",1);}
     private int speed(){return prefs().getInt("speed",1);}
     private int holdDuration(){return speed()==0?450:speed()==1?950:1700;}
     private String strategyName(){return new String[]{"Sequential","First & Last","Balanced","Adaptive"}[Math.max(0,Math.min(3,strategy()))];}
     private SharedPreferences prefs(){return getSharedPreferences("bot",MODE_PRIVATE);}
     private void log(String tag,String msg){BotLog.write(this,tag,msg);}
-    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v0.8 strategy engine connected");}
+    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v0.9 navigation engine connected");}
     @Override public void onAccessibilityEvent(AccessibilityEvent e){if(e!=null&&(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED||e.getEventType()==AccessibilityEvent.TYPE_WINDOWS_CHANGED)){CharSequence p=e.getPackageName();if(p!=null)foreground=p.toString();}}
     @Override public void onInterrupt(){stop("Interrupted");}
     @Override public void onDestroy(){stop("Destroyed");ocr.close();instance=null;super.onDestroy();}
@@ -61,7 +64,7 @@ public class TapService extends AccessibilityService {
     public int getCount(){return taps;}
     public void start(){begin(false);}
     public void startCalibration(){begin(true);}
-    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;pendingVerification=false;ineffective=0;blockedPhase="";blockedHash=0;verified=0;unverified=0;phase="WAITING";currentStation=-1;lastStation=-1;stationVisits=0;maxSeen=0;upgradeRound=0;noAffordable=0;preferMain=false;mainMenuAttempted=false;stationMax=false;log("CONFIG","strategy="+strategyName()+" speed="+speed()+" mainUpgrades="+prefs().getBoolean("mainUpgrades",true)+" autoRenovate="+prefs().getBoolean("autoRenovate",false));log("START",(one?"ONE TAP TEST":"AUTO v0.8")+" target="+target);schedule(1500);}
+    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;pendingVerification=false;ineffective=0;blockedPhase="";blockedHash=0;verified=0;unverified=0;phase="WAITING";currentStation=-1;lastStation=-1;stationVisits=0;maxSeen=0;upgradeRound=0;noAffordable=0;preferMain=false;mainMenuAttempted=false;stationMax=false;menuPurchases=0;menuScrolls=0;arrowFailures=0;lastArrowAttempt=0;lastMenuFirst="";log("CONFIG","strategy="+strategyName()+" speed="+speed()+" mainUpgrades="+prefs().getBoolean("mainUpgrades",true)+" autoRenovate="+prefs().getBoolean("autoRenovate",false));log("START",(one?"ONE TAP TEST":"AUTO v0.9")+" target="+target);schedule(1500);}
     public void stop(String reason){boolean was=running;running=false;busy=false;awaiting=false;handler.removeCallbacks(cycle);if(was)log("STOP",reason+"; taps="+taps+" verified="+verified+" unverified="+unverified+" scans="+scans+" phase="+phase);}
     private void schedule(long ms){handler.removeCallbacks(cycle);if(running)handler.postDelayed(cycle,Math.max(650,ms));}
     private void capture(){
@@ -105,7 +108,7 @@ public class TapService extends AccessibilityService {
         boolean levelUp=pendingLevel>=0&&level>pendingLevel;
         boolean screenChanged=now!=pendingHash;
         // A changed image alone may be animation; do not claim a purchase succeeded.
-        boolean semanticChanged=levelUp||(!pendingText.equals(s.all)&&!s.all.contains("level")&&pendingPhase.equals("UNLOCK"));
+        boolean semanticChanged=levelUp||(!pendingText.equals(s.all)&&!s.all.contains("level")&&pendingPhase.equals("UNLOCK")) || (pendingPhase.equals("COIN_UPGRADE") && !pendingText.equals(s.all) && s.all.contains("upgrades"));
         if(levelUp||semanticChanged){verified++;ineffective=0;blockedPhase="";log("VERIFY",pendingPhase+" CONFIRMED; level="+pendingLevel+"->"+level+" imageChanged="+screenChanged);}
         else{unverified++;ineffective++;log("VERIFY",pendingPhase+" NOT CONFIRMED; imageChanged="+screenChanged+" level="+pendingLevel+"->"+level+" repeat="+ineffective);
             if(ineffective>=2 && !pendingPhase.equals("STATION_HOLD") && !pendingPhase.equals("MAIN_MENU_OPEN") && !pendingPhase.equals("ARROW_SELECT")){blockedPhase=pendingPhase;blockedHash=now;log("SAFE","Pausing repeated "+blockedPhase+" on unchanged screen; no blind retries");}
@@ -140,11 +143,12 @@ public class TapService extends AccessibilityService {
             ArrayList<Line> prices=new ArrayList<>();for(Line l:s.lines)if(l.box.centerX()>w*0.62&&l.box.centerY()>h*0.33&&l.box.centerY()<h*0.83&&amount(l.text)>0&&l.text.matches(".*[0-9].*")&&blue(bitmap,l.box.centerX(),l.box.centerY()))prices.add(l);
             Collections.sort(prices,Comparator.comparingInt(a->a.box.top));
             if(!prices.isEmpty()){
-                noAffordable=0;Line choice=prices.get(0);int x=choice.box.centerX(),y=choice.box.centerY();
+                noAffordable=0;Line choice=prices.get(0);
+                if(menuPurchases>=10){menuPurchases=0;menuScrolls=0;close(s);return;}int x=choice.box.centerX(),y=choice.box.centerY();
                 if(stalls>=4){log("WAIT","Upgrade list unchanged; scroll or exit");if(scrolls<3){scrolls++;swipe(w*3/4,h*3/4,w*3/4,h/2,"UPGRADES_SCROLL");}else close(s);return;}
-                log("VISION","Coin upgrade candidate "+choice.text+" at "+x+","+y);act(x,y,"COIN_UPGRADE",false);return;
+                log("VISION","Coin upgrade candidate "+choice.text+" at "+x+","+y);menuPurchases++;act(x,y,"COIN_UPGRADE",false);return;
             }
-            if(scrolls<3){scrolls++;swipe(w*3/4,h*3/4,w*3/4,h/2,"UPGRADES_SCROLL");}else {scrolls=0;noAffordable++;close(s);}return;
+            if(menuScrolls<2){menuScrolls++;swipe(w*3/4,h*3/4,w*3/4,h/2,"UPGRADES_SCROLL");}else {menuScrolls=0;menuPurchases=0;noAffordable++;close(s);}return;
         }
         // Renovation: require both Before and After and an enabled blue button near the bottom.
         if(has(s,"renovate")&&has(s,"before")&&has(s,"after")){
@@ -170,7 +174,7 @@ public class TapService extends AccessibilityService {
             if(!candidates.isEmpty()){
                 Collections.sort(candidates,(a,b)->Integer.compare(b.box.centerY(),a.box.centerY()));
                 Line buy=candidates.get(0);
-                if(stalls>=4 || ineffective>=2){
+                if(stalls>=3 || ineffective>=2){
                     preferMain=true;ineffective=0;
                     log("STATION","Level not progressing; trying main upgrades / other stations");
                     close(s);return;
@@ -180,7 +184,7 @@ public class TapService extends AccessibilityService {
                 gesture(buy.box.centerX(),buy.box.centerY(),buy.box.centerX(),buy.box.centerY(),holdDuration(),"STATION_HOLD",false);
                 return;
             }
-            preferMain=true;logOccasionally("No blue station coin button; likely unaffordable, switching to main upgrades");
+            preferMain=true;log("NAV","Station purchase not blue; closing immediately to switch targets");
             close(s);return;
         }
         // Unlock station: text inside an active button, not a guessed offset.
@@ -190,7 +194,7 @@ public class TapService extends AccessibilityService {
         // Restrict to playfield to avoid touching red close buttons / bottom navigation.
         phase="EXPLORE";
         if(preferMain && prefs().getBoolean("mainUpgrades",true)){
-            if(System.currentTimeMillis()-lastMenuAttempt>4500){
+            if(System.currentTimeMillis()-lastMenuAttempt>2200){
                 lastMenuAttempt=System.currentTimeMillis();mainMenuAttempted=true;
                 // Known bottom-right Upgrades control; must be verified by OCR on next scan.
                 log("NAV","Opening bottom-right upgrades control (screen-relative candidate)");
@@ -203,32 +207,44 @@ public class TapService extends AccessibilityService {
             if(candidate!=null){
                 currentStation=candidate[0];stationVisits++;
                 log("STRATEGY",strategyName()+" arrow candidate #"+stationVisits+" x="+candidate[0]+" y="+candidate[1]+" count="+arrows.size());
-                act(candidate[0],candidate[1]+Math.round(h*.022f),"ARROW_SELECT",false);return;
+                lastArrowAttempt=System.currentTimeMillis();act(candidate[0],Math.min(h-1,candidate[1]+Math.round(h*.035f)),"ARROW_SELECT",false);return;
             }
         }
         if(stalls>4&&stalls%6==0&&scrolls<6){scrolls++;swipe(w/2,h*3/4,w/2,h/3,"RESTAURANT_SCROLL");return;}
         logOccasionally("No confident station arrow; waiting or scrolling");
     }
-    // Red arrow visual candidate detector: coarse connected red-pixel clusters.
-    // Heuristic only; never use in dialogs. Reject top status and bottom navigation.
+    // Detect the white upward arrow INSIDE a red circular station badge.
+    // Search only the restaurant playfield; do not confuse red notification dots
+    // (white exclamation) or the large blue bottom navigation arrow.
+    private boolean redBadge(int c){return Color.red(c)>205 && Color.green(c)>42 && Color.green(c)<135 && Color.blue(c)>45 && Color.blue(c)<150 && Color.red(c)>Color.green(c)*1.8f;}
+    private boolean whiteGlyph(int c){return Color.red(c)>210 && Color.green(c)>210 && Color.blue(c)>210;}
+    private boolean arrowShape(Bitmap b,int cx,int cy,int r){
+        int ww=b.getWidth(),hh=b.getHeight();
+        if(cx-r<0||cy-r<0||cx+r>=ww||cy+r>=hh)return false;
+        int redRing=0, ring=0;
+        for(int a=0;a<360;a+=30){double rad=Math.toRadians(a);int x=cx+(int)(r*.72*Math.cos(rad)),y=cy+(int)(r*.72*Math.sin(rad));ring++;if(redBadge(b.getPixel(x,y)))redRing++;}
+        if(redRing<8)return false;
+        // White stem below the arrowhead, plus a wide upper arrowhead.
+        int stem=0,head=0;
+        for(int yy=cy;yy<=cy+r/3;yy+=Math.max(2,r/7))if(whiteGlyph(b.getPixel(cx,yy)))stem++;
+        for(int dx=-r/3;dx<=r/3;dx+=Math.max(2,r/7))if(whiteGlyph(b.getPixel(cx+dx,cy-r/5)))head++;
+        // Exclamation badges lack a broad white arrowhead.
+        return stem>=2 && head>=3;
+    }
     private ArrayList<int[]> redArrowCandidates(Bitmap b){
-        ArrayList<int[]> found=new ArrayList<>();int step=Math.max(7,w/100);
-        for(int yy=(int)(h*.17);yy<(int)(h*.76);yy+=step*3){
-            for(int xx=(int)(w*.07);xx<(int)(w*.92);xx+=step*3){
-                int red=0,total=0;
-                for(int dy=0;dy<step*3&&yy+dy<h;dy+=step)
-                    for(int dx=0;dx<step*3&&xx+dx<w;dx+=step){
-                        int c=b.getPixel(xx+dx,yy+dy);total++;
-                        if(Color.red(c)>170&&Color.green(c)<115&&Color.blue(c)<115&&Color.red(c)>Color.green(c)*1.65f)red++;
-                    }
-                if(red>=3&&red<total){
-                    int cx=xx+step,cy=yy+step;
-                    boolean near=false;for(int[] a:found)if(Math.abs(a[0]-cx)<w*.07&&Math.abs(a[1]-cy)<h*.05){near=true;break;}
-                    if(!near)found.add(new int[]{cx,cy});
-                }
+        ArrayList<int[]> found=new ArrayList<>();
+        int r=Math.max(17,Math.round(w*.028f));
+        int step=Math.max(7,r/3);
+        for(int yy=Math.round(h*.38f);yy<Math.round(h*.80f);yy+=step){
+            for(int xx=Math.round(w*.045f);xx<Math.round(w*.95f);xx+=step){
+                if(!arrowShape(b,xx,yy,r))continue;
+                boolean near=false;for(int[] a:found)if(Math.abs(a[0]-xx)<r*2&&Math.abs(a[1]-yy)<r*2){near=true;break;}
+                if(!near)found.add(new int[]{xx,yy});
             }
         }
-        Collections.sort(found,Comparator.comparingInt(a->a[1]));return found;
+        Collections.sort(found,(a,z)->Integer.compare(a[1],z[1]));
+        if(scans%5==1)log("ARROWS","Shape-verified station badges="+found.size());
+        return found;
     }
     private int[] chooseArrow(ArrayList<int[]> arrows){
         if(arrows.isEmpty())return null;
@@ -240,7 +256,18 @@ public class TapService extends AccessibilityService {
         return arrows.get((stalls>2||ineffective>0)?arrows.size()-1:0);
     }
     private void logOccasionally(String msg){if(scans%5==0)log("WAIT",msg);}
-    private void close(Screen s){Line x=find(s,"x");if(x!=null&&x.box.centerX()>w*.65&&x.box.centerY()<h*.5){act(x.box.centerX(),x.box.centerY(),"CLOSE",false);}else logOccasionally("No reliable close button");}
+    private void close(Screen s){
+        Line x=find(s,"x");
+        if(x!=null&&x.box.centerX()>w*.65&&x.box.centerY()<h*.5){act(x.box.centerX(),x.box.centerY(),"CLOSE",false);return;}
+        // Most Eatventure panels close by tapping outside. Try Android Back only
+        // when a station or Upgrades panel is positively identified.
+        if(phase.equals("STATION")||phase.equals("MAIN_UPGRADES")){
+            log("NAV","No OCR close glyph; Android Back on confirmed panel");
+            boolean ok=performGlobalAction(GLOBAL_ACTION_BACK);
+            if(!ok)log("ERROR","Back action rejected");
+            schedule(800);
+        }else logOccasionally("No reliable close button");
+    }
     private void act(int x,int y,String reason,boolean one){gesture(x,y,x,y,120,reason,one);}
     private void swipe(int x,int y,int toX,int toY,String reason){gesture(x,y,toX,toY,430,reason,false);}
     private void gesture(int x,int y,int ex,int ey,int duration,String reason,boolean one){

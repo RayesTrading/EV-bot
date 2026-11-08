@@ -1,28 +1,19 @@
-# Adventure Oracle v0.8 — Strategy Controls (experimental source)
+# Adventure Oracle v0.9 — Navigation Alpha
 
-## New settings in Android app
-
-- Strategy: **Sequential**, **First & Last**, **Balanced**, **Adaptive**.
-- Upgrade speed: **Normal** (450 ms), **Fast** (950 ms), **Turbo** (1700 ms) press durations.
-- Automatically buy ordinary affordable main upgrades (checkbox).
-- Allow auto-renovation only after heuristic completion checks (checkbox, OFF by default).
-
-Choose settings in the app, save, and start. Changing them requires stopping and restarting the bot (returning to the app stops the service).
-
-## How it works
-
-The station upgrade panel uses a sustained press on a recognized blue coin-price button, followed by OCR verification. When no affordable station purchase is detected, the bot attempts to close the station panel and navigate to the bottom-right main Upgrades control. In the restaurant view it searches for red arrow-like pixel clusters and chooses targets according to the selected strategy. Strategy differences are implemented in `chooseArrow()`; these are heuristic screen positions, **not reliable station identities**. The existing OCR rules handle Unlock, coin upgrades, loading, welcome and renovation dialogs.
+Experimental changes over v0.8:
+- Red station arrows require a red ring AND a white upward-arrow shape (not just red pixels).
+- Search excludes top notification badges and bottom navigation.
+- Automatically taps below a detected station arrow.
+- When station upgrades are grey, immediately attempts to close the station panel using Android Back.
+- Main upgrades use list-change evidence and periodically exit to revisit stations.
+- Four strategies and three speeds remain selectable in the app.
 
 ## Important limitations
+- Not compiled or tested on a physical phone here.
+- Arrow shape and Android Back behavior must be tested on your actual game screen.
+- Android Back may not dismiss every game popup. If it exits the game, stop and report the log.
+- Main Upgrades menu detection, restaurant scrolling, MAX tracking and renovation are still experimental.
+- Auto-renovation remains OFF by default; do not enable until all-station completion can be verified.
+- Use a supervised first run and a 10–20 action limit.
 
-- **Not verified on a real device or compiled in this environment.** The source ZIP is for a GitHub Actions build.
-- The red-arrow detector is a coarse visual heuristic. It can mistake other red objects for arrows. Stop the bot if it selects the wrong thing.
-- Bottom-right Upgrades navigation uses a relative screen location and may need calibration.
-- **The bot does not know how many stations exist in a restaurant**. It cannot yet reliably establish that *all* stations are MAX. Therefore auto-renovation is OFF by default; even if enabled, the gating is heuristic, not proof of full completion.
-- Rapid holds are followed by OCR checks, not continuous pixel monitoring while a finger is held. Do not assume grey button detection is instantaneous.
-- Existing 5-action limit may carry over from saved settings; raise it gradually after supervised tests.
-- Do not use with real-money purchases, gems, or advertisements. The existing premium-screen text blocker is retained but imperfect.
-
-## Build
-
-Extract ZIP and upload the **contents** to the repository root (including `.github/`), then run GitHub Actions `assembleDebug` workflow. No APK is included.
+Build with GitHub Actions: upload extracted project files to your repository and run the existing workflow.
