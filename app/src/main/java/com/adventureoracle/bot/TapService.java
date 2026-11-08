@@ -25,7 +25,7 @@ import java.util.concurrent.Executor;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** v0.9 experimental navigation engine. All gestures are gated by foreground game and screenshot state. */
+/** v1.0 panel navigation engine. All gestures are gated by foreground game and screenshot state. */
 public class TapService extends AccessibilityService {
     public static TapService instance;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -50,13 +50,16 @@ public class TapService extends AccessibilityService {
     private int menuPurchases=0, menuScrolls=0, arrowFailures=0;
     private long lastArrowAttempt=0;
     private String lastMenuFirst="";
+    private int dismissAttempts=0, menuOpenAttempts=0;
+    private String dismissFrom="";
+    private long nextMainTry=0;
     private int strategy(){return prefs().getInt("strategy",1);}
     private int speed(){return prefs().getInt("speed",1);}
     private int holdDuration(){return speed()==0?450:speed()==1?950:1700;}
     private String strategyName(){return new String[]{"Sequential","First & Last","Balanced","Adaptive"}[Math.max(0,Math.min(3,strategy()))];}
     private SharedPreferences prefs(){return getSharedPreferences("bot",MODE_PRIVATE);}
     private void log(String tag,String msg){BotLog.write(this,tag,msg);}
-    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v0.9 navigation engine connected");}
+    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v1.0 panel navigation engine connected");}
     @Override public void onAccessibilityEvent(AccessibilityEvent e){if(e!=null&&(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED||e.getEventType()==AccessibilityEvent.TYPE_WINDOWS_CHANGED)){CharSequence p=e.getPackageName();if(p!=null)foreground=p.toString();}}
     @Override public void onInterrupt(){stop("Interrupted");}
     @Override public void onDestroy(){stop("Destroyed");ocr.close();instance=null;super.onDestroy();}
@@ -64,7 +67,7 @@ public class TapService extends AccessibilityService {
     public int getCount(){return taps;}
     public void start(){begin(false);}
     public void startCalibration(){begin(true);}
-    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;pendingVerification=false;ineffective=0;blockedPhase="";blockedHash=0;verified=0;unverified=0;phase="WAITING";currentStation=-1;lastStation=-1;stationVisits=0;maxSeen=0;upgradeRound=0;noAffordable=0;preferMain=false;mainMenuAttempted=false;stationMax=false;menuPurchases=0;menuScrolls=0;arrowFailures=0;lastArrowAttempt=0;lastMenuFirst="";log("CONFIG","strategy="+strategyName()+" speed="+speed()+" mainUpgrades="+prefs().getBoolean("mainUpgrades",true)+" autoRenovate="+prefs().getBoolean("autoRenovate",false));log("START",(one?"ONE TAP TEST":"AUTO v0.9")+" target="+target);schedule(1500);}
+    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;pendingVerification=false;ineffective=0;blockedPhase="";blockedHash=0;verified=0;unverified=0;phase="WAITING";currentStation=-1;lastStation=-1;stationVisits=0;maxSeen=0;upgradeRound=0;noAffordable=0;preferMain=false;mainMenuAttempted=false;stationMax=false;menuPurchases=0;menuScrolls=0;arrowFailures=0;lastArrowAttempt=0;lastMenuFirst="";dismissAttempts=0;menuOpenAttempts=0;dismissFrom="";nextMainTry=0;log("CONFIG","strategy="+strategyName()+" speed="+speed()+" mainUpgrades="+prefs().getBoolean("mainUpgrades",true)+" autoRenovate="+prefs().getBoolean("autoRenovate",false));log("START",(one?"ONE TAP TEST":"AUTO v1.0")+" target="+target);schedule(1500);}
     public void stop(String reason){boolean was=running;running=false;busy=false;awaiting=false;handler.removeCallbacks(cycle);if(was)log("STOP",reason+"; taps="+taps+" verified="+verified+" unverified="+unverified+" scans="+scans+" phase="+phase);}
     private void schedule(long ms){handler.removeCallbacks(cycle);if(running)handler.postDelayed(cycle,Math.max(650,ms));}
     private void capture(){
@@ -139,12 +142,12 @@ public class TapService extends AccessibilityService {
         }
         // Upgrades list: cost labels are positioned inside blue coin buttons at the right.
         if(has(s,"upgrades")&&!has(s,"upgrade your restaurant")){
-            phase="MAIN_UPGRADES";preferMain=false;mainMenuAttempted=false;
+            phase="MAIN_UPGRADES";dismissAttempts=0;dismissFrom="";preferMain=false;mainMenuAttempted=false;menuOpenAttempts=0;
             ArrayList<Line> prices=new ArrayList<>();for(Line l:s.lines)if(l.box.centerX()>w*0.62&&l.box.centerY()>h*0.33&&l.box.centerY()<h*0.83&&amount(l.text)>0&&l.text.matches(".*[0-9].*")&&blue(bitmap,l.box.centerX(),l.box.centerY()))prices.add(l);
             Collections.sort(prices,Comparator.comparingInt(a->a.box.top));
             if(!prices.isEmpty()){
                 noAffordable=0;Line choice=prices.get(0);
-                if(menuPurchases>=10){menuPurchases=0;menuScrolls=0;close(s);return;}int x=choice.box.centerX(),y=choice.box.centerY();
+                if(menuPurchases>=16){menuPurchases=0;menuScrolls=0;close(s);return;}int x=choice.box.centerX(),y=choice.box.centerY();
                 if(stalls>=4){log("WAIT","Upgrade list unchanged; scroll or exit");if(scrolls<3){scrolls++;swipe(w*3/4,h*3/4,w*3/4,h/2,"UPGRADES_SCROLL");}else close(s);return;}
                 log("VISION","Coin upgrade candidate "+choice.text+" at "+x+","+y);menuPurchases++;act(x,y,"COIN_UPGRADE",false);return;
             }
@@ -164,7 +167,7 @@ public class TapService extends AccessibilityService {
         if(has(s,"level")&&!has(s,"upgrades")){
             phase="STATION";
             if(has(s,"max")){
-                stationMax=true;maxSeen++;preferMain=false;
+                stationMax=true;if(!dismissFrom.equals("STATION"))maxSeen++;preferMain=false;
                 log("STATION","MAX recognized; closing and selecting another station");
                 close(s);return;
             }
@@ -192,10 +195,10 @@ public class TapService extends AccessibilityService {
         if(unlock!=null){phase="UNLOCK";if(stalls>=4){logOccasionally("Unlock unchanged; scanning instead of repeating");return;}act(unlock.box.centerX(),unlock.box.centerY(),"UNLOCK",false);return;}
         // Restaurant world: locate red arrow clusters in the playfield.
         // Restrict to playfield to avoid touching red close buttons / bottom navigation.
-        phase="EXPLORE";
-        if(preferMain && prefs().getBoolean("mainUpgrades",true)){
-            if(System.currentTimeMillis()-lastMenuAttempt>2200){
-                lastMenuAttempt=System.currentTimeMillis();mainMenuAttempted=true;
+        phase="EXPLORE";dismissAttempts=0;dismissFrom="";
+        if(preferMain && prefs().getBoolean("mainUpgrades",true) && System.currentTimeMillis()>=nextMainTry){
+            if(System.currentTimeMillis()-lastMenuAttempt>1500){
+                lastMenuAttempt=System.currentTimeMillis();mainMenuAttempted=true;menuOpenAttempts++;if(menuOpenAttempts>3){log("RECOVER","Main Upgrades did not open; returning to station search");preferMain=false;menuOpenAttempts=0;nextMainTry=System.currentTimeMillis()+10000;}
                 // Known bottom-right Upgrades control; must be verified by OCR on next scan.
                 log("NAV","Opening bottom-right upgrades control (screen-relative candidate)");
                 act(Math.round(w*.91f),Math.round(h*.91f),"MAIN_MENU_OPEN",false);return;
@@ -256,17 +259,24 @@ public class TapService extends AccessibilityService {
         return arrows.get((stalls>2||ineffective>0)?arrows.size()-1:0);
     }
     private void logOccasionally(String msg){if(scans%5==0)log("WAIT",msg);}
+    // Eatventure closes its station and upgrades panels by tapping outside.
+    // Android Back is intentionally not used: the device did not dismiss these panels.
     private void close(Screen s){
-        Line x=find(s,"x");
-        if(x!=null&&x.box.centerX()>w*.65&&x.box.centerY()<h*.5){act(x.box.centerX(),x.box.centerY(),"CLOSE",false);return;}
-        // Most Eatventure panels close by tapping outside. Try Android Back only
-        // when a station or Upgrades panel is positively identified.
-        if(phase.equals("STATION")||phase.equals("MAIN_UPGRADES")){
-            log("NAV","No OCR close glyph; Android Back on confirmed panel");
-            boolean ok=performGlobalAction(GLOBAL_ACTION_BACK);
-            if(!ok)log("ERROR","Back action rejected");
-            schedule(800);
-        }else logOccasionally("No reliable close button");
+        String context=phase;
+        if(!context.equals("STATION")&&!context.equals("MAIN_UPGRADES"))return;
+        if(!context.equals(dismissFrom)){dismissFrom=context;dismissAttempts=0;}
+        dismissAttempts++;
+        if(dismissAttempts>3){
+            log("RECOVER","Panel remains open after 3 outside taps; pausing navigation rather than repeating Back");
+            stop("Panel dismissal failed: "+context);
+            return;
+        }
+        // Upper-left portion of playfield, outside the central upgrade sheet.
+        // Alternate between safe exterior locations; verify on the next screenshot.
+        int x=Math.round(w*(dismissAttempts==2?.90f:.08f));
+        int y=Math.round(h*(dismissAttempts==3?.30f:.36f));
+        log("NAV","Outside-tap close "+context+" attempt="+dismissAttempts+" at "+x+","+y);
+        act(x,y,"PANEL_DISMISS",false);
     }
     private void act(int x,int y,String reason,boolean one){gesture(x,y,x,y,120,reason,one);}
     private void swipe(int x,int y,int toX,int toY,String reason){gesture(x,y,toX,toY,430,reason,false);}
@@ -276,15 +286,15 @@ public class TapService extends AccessibilityService {
         if(x<0||x>=w||y<0||y>=h||ex<0||ex>=w||ey<0||ey>=h)return;
         awaiting=true;lastGesture=System.currentTimeMillis();lastAction=reason;lastX=x;lastY=y;
         if(!one && !reason.contains("SCROLL") && !reason.equals("CLOSE")){
-            pendingVerification=!reason.equals("ARROW_SELECT")&&!reason.equals("MAIN_MENU_OPEN");pendingPhase=reason;pendingText=previous;pendingLevel=stationLevel(previous);
+            pendingVerification=!reason.equals("ARROW_SELECT")&&!reason.equals("MAIN_MENU_OPEN")&&!reason.equals("PANEL_DISMISS");pendingPhase=reason;pendingText=previous;pendingLevel=stationLevel(previous);
             // fingerprint is captured in decide() before dispatch.
         }
         Path path=new Path();path.moveTo(x,y);if(x!=ex||y!=ey)path.lineTo(ex,ey);
         GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,duration);
         boolean ok=dispatchGesture(new GestureDescription.Builder().addStroke(stroke).build(),new GestureResultCallback(){
-            @Override public void onCompleted(GestureDescription g){awaiting=false;taps++;log("ACTION",reason+" #"+taps+" ("+x+","+y+") -> ("+ex+","+ey+") Android completed; checking next screenshot");if(one)stop("One-tap test done");else schedule(reason.equals("RENOVATE")?5000:reason.equals("STATION_HOLD")?650:prefs().getInt("interval",1500));}
-            @Override public void onCancelled(GestureDescription g){awaiting=false;log("ERROR","Gesture cancelled "+reason);if(one)stop("Test cancelled");else schedule(2000);}
+            @Override public void onCompleted(GestureDescription g){awaiting=false;taps++;log("ACTION",reason+" #"+taps+" ("+x+","+y+") -> ("+ex+","+ey+") Android completed; checking next screenshot");if(one)stop("One-tap test done");else schedule(reason.equals("RENOVATE")?5000:reason.equals("STATION_HOLD")?650:reason.equals("COIN_UPGRADE")?650:reason.equals("PANEL_DISMISS")?750:prefs().getInt("interval",1500));}
+            @Override public void onCancelled(GestureDescription g){awaiting=false;pendingVerification=false;log("ERROR","Gesture cancelled "+reason);if(one)stop("Test cancelled");else schedule(2000);}
         },handler);
-        if(!ok){awaiting=false;log("ERROR","Gesture rejected "+reason);if(one)stop("Test rejected");else schedule(2000);}
+        if(!ok){awaiting=false;pendingVerification=false;log("ERROR","Gesture rejected "+reason);if(one)stop("Test rejected");else schedule(2000);}
     }
 }
