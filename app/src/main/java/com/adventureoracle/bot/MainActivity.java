@@ -13,6 +13,7 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout layout;
     private EditText pkg, x, y, interval, limit;
+    private CheckBox autoUpgrade;
     private TextView status, diagnostics;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -21,16 +22,23 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); layout.setPadding(28,28,28,28);
         scroll.addView(layout); setContentView(scroll);
-        title("Adventure Oracle Bot — Vision Beta 0.4");
-        note("TCL 10 Pro testing. Vision beta uses on-device text recognition to attempt station unlocking, upgrading and renovation. It is experimental: supervise it and use STOP if it misidentifies a screen.");
+        title("Adventure Oracle Bot — Vision Beta 0.5");
+        note("TCL 10 Pro testing. First run ONE TEST TAP and confirm the game reacts. Then enable calibrated upgrades. Renovation remains manual; supervise all automation.");
         pkg = field("Eatventure package name", prefs.getString("package", "com.hwqgrhhjfd.idlefastfood"));
         x = field("Fallback tap X (% of screen width, 0–100)", String.valueOf(prefs.getInt("x",50)));
         y = field("Fallback tap Y (% of screen height, 0–100)", String.valueOf(prefs.getInt("y",75)));
         interval = field("Interval between taps (milliseconds, 500–10000)", String.valueOf(prefs.getInt("interval",1500)));
         limit = field("Maximum taps per session (1–500)", String.valueOf(prefs.getInt("limit",5)));
+        autoUpgrade = new CheckBox(this); autoUpgrade.setText("Enable auto-upgrade at calibrated X/Y (only after test tap)"); autoUpgrade.setChecked(prefs.getBoolean("autoUpgrade",false)); layout.addView(autoUpgrade);
         button("1. Enable Accessibility Service", () -> { BotLog.write(this,"INFO","Opening Accessibility settings"); startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); });
         button("2. Save settings", this::save);
-        button("3. START — switch to Eatventure", () -> {
+        button("3. ONE TEST TAP — switch to Eatventure", () -> {
+            if (!save()) return;
+            if (TapService.instance == null) { showStatus("Enable Accessibility first"); return; }
+            TapService.instance.startCalibration();
+            showStatus("Switch to Eatventure. One tap will be sent to your chosen X/Y. Verify visible effect.");
+        });
+        button("4. START OCR BOT — switch to Eatventure", () -> {
             if (!save()) return;
             if (TapService.instance == null) { showStatus("ERROR: Accessibility Service is not connected. Open Android Accessibility settings, enable Adventure Oracle Bot, then return."); BotLog.write(this,"ERROR","Start rejected: service not connected"); return; }
             TapService.instance.start();
@@ -44,7 +52,7 @@ public class MainActivity extends Activity {
         button("Share full debug report", this::shareLog);
         button("Copy report text", () -> { android.content.ClipboardManager cb = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE); cb.setPrimaryClip(android.content.ClipData.newPlainText("Adventure Oracle debug", BotLog.read(this))); Toast.makeText(this,"Copied",Toast.LENGTH_SHORT).show(); });
         diagnostics = new TextView(this); diagnostics.setTextSize(12); diagnostics.setTextIsSelectable(true); diagnostics.setPadding(0,16,0,16); layout.addView(diagnostics);
-        note("Safety: vision beta only acts on recognized game text. Avoid premium purchases, ads, and account controls. Returning to this app stops the bot. Increase the tap limit only after supervised testing.");
+        note("Important: TEST TAP uses X/Y. OCR Unlock uses text center. Upgrade uses X/Y ONLY when auto-upgrade is enabled. Offline earnings, MAX stations, and Renovate require manual input. Never enable on purchase screens.");
         refreshDiagnostics();
     }
     private void title(String s) { TextView t = new TextView(this); t.setText(s); t.setTextSize(22); t.setPadding(0,8,0,16); layout.addView(t); }
@@ -73,7 +81,7 @@ public class MainActivity extends Activity {
             int ms = Integer.parseInt(interval.getText().toString().trim()), max = Integer.parseInt(limit.getText().toString().trim());
             String packageName = pkg.getText().toString().trim();
             if (xx < 0 || xx > 100 || yy < 0 || yy > 100 || ms < 500 || ms > 10000 || max < 1 || max > 500 || packageName.isEmpty()) throw new IllegalArgumentException("Invalid setting range");
-            prefs.edit().putInt("x",xx).putInt("y",yy).putInt("interval",ms).putInt("limit",max).putString("package",packageName).apply();
+            prefs.edit().putInt("x",xx).putInt("y",yy).putInt("interval",ms).putInt("limit",max).putString("package",packageName).putBoolean("autoUpgrade",autoUpgrade.isChecked()).apply();
             BotLog.write(this,"INFO","Settings saved: package="+packageName+", x="+xx+"%, y="+yy+"%, interval="+ms+"ms, limit="+max);
             Toast.makeText(this,"Saved",Toast.LENGTH_SHORT).show(); return true;
         } catch (Exception e) { BotLog.write(this,"ERROR","Invalid settings: " + e.getMessage()); showStatus("ERROR: Check numeric settings and allowed ranges."); return false; }
