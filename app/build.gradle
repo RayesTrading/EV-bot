@@ -1,6 +1,6 @@
 plugins { id 'com.android.application' }
 android { namespace 'com.adventureoracle.bot'; compileSdk 35
-    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 10; versionName '1.0-navigation-alpha' }
+    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 11; versionName '1.1-menu-map-alpha' }
 }
 
 dependencies { implementation "androidx.core:core:1.12.0"
