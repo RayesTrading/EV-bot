@@ -22,14 +22,14 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); layout.setPadding(28,28,28,28);
         scroll.addView(layout); setContentView(scroll);
-        title("Adventure Oracle Bot — Autonomous Alpha 0.6");
+        title("Adventure Oracle Bot — Verified Actions 0.7");
         note("TCL 10 Pro testing. OCR + visual button detection: stations, upgrades, unlock, renovate and city transitions. Experimental: supervise and use STOP if it misidentifies a screen.");
         pkg = field("Eatventure package name", prefs.getString("package", "com.hwqgrhhjfd.idlefastfood"));
         x = field("Fallback tap X (% of screen width, 0–100)", String.valueOf(prefs.getInt("x",50)));
         y = field("Fallback tap Y (% of screen height, 0–100)", String.valueOf(prefs.getInt("y",75)));
         interval = field("Interval between taps (milliseconds, 500–10000)", String.valueOf(prefs.getInt("interval",1500)));
-        limit = field("Maximum taps per session (1–500)", String.valueOf(prefs.getInt("limit",5)));
-        autoUpgrade = new CheckBox(this); autoUpgrade.setText("Enable fallback station tapping at X/Y (experimental)"); autoUpgrade.setChecked(prefs.getBoolean("autoUpgrade",false)); layout.addView(autoUpgrade);
+        limit = field("Maximum taps per session (1–500)", String.valueOf(prefs.getInt("limit",12)));
+        autoUpgrade = new CheckBox(this); autoUpgrade.setText("Legacy fallback setting (disabled in verified mode)"); autoUpgrade.setChecked(prefs.getBoolean("autoUpgrade",false)); layout.addView(autoUpgrade);
         button("1. Enable Accessibility Service", () -> { BotLog.write(this,"INFO","Opening Accessibility settings"); startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); });
         button("2. Save settings", this::save);
         button("3. ONE TEST TAP — switch to Eatventure", () -> {
@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
         button("Share full debug report", this::shareLog);
         button("Copy report text", () -> { android.content.ClipboardManager cb = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE); cb.setPrimaryClip(android.content.ClipData.newPlainText("Adventure Oracle debug", BotLog.read(this))); Toast.makeText(this,"Copied",Toast.LENGTH_SHORT).show(); });
         diagnostics = new TextView(this); diagnostics.setTextSize(12); diagnostics.setTextIsSelectable(true); diagnostics.setPadding(0,16,0,16); layout.addView(diagnostics);
-        note("Alpha 0.6 uses OCR + visual color checks. Station upgrades, ordinary coin upgrades, unlock, renovate and welcome are attempted when confidently identified. No ads, gems or real-money purchases. Fallback X/Y is optional.");
+        note("Alpha 0.7 verifies actions and pauses after repeated unconfirmed gestures. Station upgrades, ordinary coin upgrades, unlock, renovate and welcome are attempted when confidently identified. No ads, gems or real-money purchases. Fallback X/Y is optional.");
         refreshDiagnostics();
     }
     private void title(String s) { TextView t = new TextView(this); t.setText(s); t.setTextSize(22); t.setPadding(0,8,0,16); layout.addView(t); }

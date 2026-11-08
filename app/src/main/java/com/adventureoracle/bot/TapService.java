@@ -37,9 +37,16 @@ public class TapService extends AccessibilityService {
     private String foreground="",target="com.hwqgrhhjfd.idlefastfood",previous="",lastAction="",phase="WAITING";
     private long lastGesture=0,lastScreenLog=0;
     private int lastX=-1,lastY=-1;
+    private boolean pendingVerification=false;
+    private String pendingPhase="", pendingText="";
+    private long pendingHash=0;
+    private int pendingLevel=-1, ineffective=0;
+    private String blockedPhase="";
+    private long blockedHash=0;
+    private int verified=0, unverified=0;
     private SharedPreferences prefs(){return getSharedPreferences("bot",MODE_PRIVATE);}
     private void log(String tag,String msg){BotLog.write(this,tag,msg);}
-    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v0.6 vision state machine connected");}
+    @Override protected void onServiceConnected(){super.onServiceConnected();instance=this;log("INFO","v0.7 verified-actions service connected");}
     @Override public void onAccessibilityEvent(AccessibilityEvent e){if(e!=null&&(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED||e.getEventType()==AccessibilityEvent.TYPE_WINDOWS_CHANGED)){CharSequence p=e.getPackageName();if(p!=null)foreground=p.toString();}}
     @Override public void onInterrupt(){stop("Interrupted");}
     @Override public void onDestroy(){stop("Destroyed");ocr.close();instance=null;super.onDestroy();}
@@ -47,8 +54,8 @@ public class TapService extends AccessibilityService {
     public int getCount(){return taps;}
     public void start(){begin(false);}
     public void startCalibration(){begin(true);}
-    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;phase="WAITING";log("START",(one?"ONE TAP TEST":"AUTO v0.6")+" target="+target);schedule(1500);}
-    public void stop(String reason){boolean was=running;running=false;busy=false;awaiting=false;handler.removeCallbacks(cycle);if(was)log("STOP",reason+"; taps="+taps+" scans="+scans+" phase="+phase);}
+    private void begin(boolean one){stop("Restart");target=prefs().getString("package","com.hwqgrhhjfd.idlefastfood");running=true;test=one;taps=0;scans=0;stalls=0;scrolls=0;failures=0;previous="";lastAction="";lastX=-1;lastY=-1;pendingVerification=false;ineffective=0;blockedPhase="";blockedHash=0;verified=0;unverified=0;phase="WAITING";log("START",(one?"ONE TAP TEST":"AUTO v0.7")+" target="+target);schedule(1500);}
+    public void stop(String reason){boolean was=running;running=false;busy=false;awaiting=false;handler.removeCallbacks(cycle);if(was)log("STOP",reason+"; taps="+taps+" verified="+verified+" unverified="+unverified+" scans="+scans+" phase="+phase);}
     private void schedule(long ms){handler.removeCallbacks(cycle);if(running)handler.postDelayed(cycle,Math.max(650,ms));}
     private void capture(){
         if(!running||busy||awaiting)return;
@@ -77,6 +84,26 @@ public class TapService extends AccessibilityService {
     private void recover(String error){busy=false;failures++;log("ERROR",error);if(failures>=8)stop("Repeated screenshot failures");else schedule(2000);}
     private static class Line {String text;Rect box;Line(String t,Rect r){text=t;box=r;}}
     private static class Screen {ArrayList<Line> lines=new ArrayList<>();String all="";}
+    private static final Pattern LEVEL_PATTERN=Pattern.compile("\\blevel\\s*([0-9]+)");
+    private int stationLevel(String words){Matcher m=LEVEL_PATTERN.matcher(words);return m.find()?Integer.parseInt(m.group(1)):-1;}
+    // Sample the game image outside of the status bar and navigation bar. No images are stored.
+    private long fingerprint(Bitmap b){long hash=1469598103934665603L;int ww=b.getWidth(),hh=b.getHeight();for(int row=2;row<18;row++)for(int col=1;col<13;col++){
+        int x=col*ww/14,y=row*hh/20;int c=b.getPixel(x,y);int rgb=((Color.red(c)/24)<<8)|((Color.green(c)/24)<<4)|(Color.blue(c)/24);
+        hash^=rgb;hash*=1099511628211L;
+    }return hash;}
+    private void verify(Screen s,Bitmap b){
+        if(!pendingVerification)return;
+        pendingVerification=false;
+        long now=fingerprint(b);int level=stationLevel(s.all);
+        boolean levelUp=pendingLevel>=0&&level>pendingLevel;
+        boolean screenChanged=now!=pendingHash;
+        // A changed image alone may be animation; do not claim a purchase succeeded.
+        boolean semanticChanged=levelUp||(!pendingText.equals(s.all)&&!s.all.contains("level")&&pendingPhase.equals("UNLOCK"));
+        if(levelUp||semanticChanged){verified++;ineffective=0;blockedPhase="";log("VERIFY",pendingPhase+" CONFIRMED; level="+pendingLevel+"->"+level+" imageChanged="+screenChanged);}
+        else{unverified++;ineffective++;log("VERIFY",pendingPhase+" NOT CONFIRMED; imageChanged="+screenChanged+" level="+pendingLevel+"->"+level+" repeat="+ineffective);
+            if(ineffective>=2){blockedPhase=pendingPhase;blockedHash=now;log("SAFE","Pausing repeated "+blockedPhase+" on unchanged screen; no blind retries");}
+        }
+    }
     private Screen parse(Text t){Screen s=new Screen();StringBuilder b=new StringBuilder();for(Text.TextBlock block:t.getTextBlocks())for(Text.Line line:block.getLines())if(line.getBoundingBox()!=null){String v=line.getText().toLowerCase(Locale.ROOT).trim();s.lines.add(new Line(v,line.getBoundingBox()));b.append(v).append(' ');}s.all=b.toString();return s;}
     private boolean has(Screen s,String... keys){for(String k:keys)if(s.all.contains(k))return true;return false;}
     private Line find(Screen s,String key){for(Line l:s.lines)if(l.text.contains(key))return l;return null;}
@@ -88,8 +115,12 @@ public class TapService extends AccessibilityService {
     private void decide(Text raw,Bitmap bitmap){
         if(!running||!target.equals(foreground))return;
         scans++;failures=0;Screen s=parse(raw);String words=s.all;
+        verify(s,bitmap);
+        long currentHash=fingerprint(bitmap);pendingHash=currentHash;
+        if(!blockedPhase.isEmpty() && !words.equals(pendingText) && !words.contains("level")){blockedPhase="";ineffective=0;log("VERIFY","Recognized screen context changed; action block cleared");}
         boolean unchanged=words.equals(previous);stalls=unchanged?stalls+1:0;previous=words;
         if(scans%5==1)log("SCAN","#"+scans+" "+w+"x"+h+" phase="+phase+" text="+words.substring(0,Math.min(180,words.length())));
+        if(!blockedPhase.isEmpty()){phase="PAUSED_UNVERIFIED";logOccasionally("Paused after ineffective "+blockedPhase+"; change game screen manually or restart");return;}
         if(premium(s)){phase="PREMIUM_BLOCKED";if(scans%5==1)log("SAFE","Ad/premium screen; no action");return;}
         if(has(s,"loading","please wait")&&!has(s,"level","upgrades")){phase="LOADING";return;}
         // Offline earnings: only an ordinary Collect button, never x2/ad.
@@ -99,7 +130,7 @@ public class TapService extends AccessibilityService {
         // Upgrades list: cost labels are positioned inside blue coin buttons at the right.
         if(has(s,"upgrades")&&!has(s,"upgrade your restaurant")){
             phase="MAIN_UPGRADES";
-            ArrayList<Line> prices=new ArrayList<>();for(Line l:s.lines)if(l.box.centerX()>w*0.62&&l.box.centerY()>h*0.33&&l.box.centerY()<h*0.83&&amount(l.text)>0&&blue(bitmap,l.box.centerX(),l.box.centerY()))prices.add(l);
+            ArrayList<Line> prices=new ArrayList<>();for(Line l:s.lines)if(l.box.centerX()>w*0.62&&l.box.centerY()>h*0.33&&l.box.centerY()<h*0.83&&amount(l.text)>0&&l.text.matches(".*[0-9].*")&&blue(bitmap,l.box.centerX(),l.box.centerY()))prices.add(l);
             Collections.sort(prices,Comparator.comparingInt(a->a.box.top));
             if(!prices.isEmpty()){
                 Line choice=prices.get(0);int x=choice.box.centerX(),y=choice.box.centerY();
@@ -110,7 +141,7 @@ public class TapService extends AccessibilityService {
         }
         // Renovation: require both Before and After and an enabled blue button near the bottom.
         if(has(s,"renovate")&&has(s,"before")&&has(s,"after")){
-            phase="RENOVATE";Line price=null;for(Line l:s.lines)if(l.box.centerY()>h*.64&&l.box.centerY()<h*.83&&amount(l.text)>0&&blue(bitmap,l.box.centerX(),l.box.centerY()))price=l;
+            phase="RENOVATE";Line price=null;for(Line l:s.lines)if(l.box.centerY()>h*.64&&l.box.centerY()<h*.83&&amount(l.text)>0&&l.text.matches(".*[0-9].*")&&blue(bitmap,l.box.centerX(),l.box.centerY()))price=l;
             if(price!=null){log("VISION","Enabled renovate coin button "+price.text);act(price.box.centerX(),price.box.centerY(),"RENOVATE",false);}else logOccasionally("Renovate button disabled/unrecognized; waiting");return;
         }
         // Welcome after a city/restaurant transition: recognize ordinary Continue/Play/Start buttons.
@@ -122,13 +153,13 @@ public class TapService extends AccessibilityService {
         if(has(s,"level")&&!has(s,"upgrades")){
             phase="STATION";
             if(has(s,"max")){logOccasionally("Station MAX: close and select another");close(s);return;}
-            ArrayList<Line> candidates=new ArrayList<>();for(Line l:s.lines)if(l.box.centerY()>h*.44&&l.box.centerY()<h*.9&&amount(l.text)>0&&blue(bitmap,l.box.centerX(),l.box.centerY()))candidates.add(l);
+            ArrayList<Line> candidates=new ArrayList<>();for(Line l:s.lines)if(l.box.centerY()>h*.44&&l.box.centerY()<h*.9&&amount(l.text)>0&&l.text.matches(".*[0-9].*")&&blue(bitmap,l.box.centerX(),l.box.centerY()))candidates.add(l);
             if(!candidates.isEmpty()){
                 Collections.sort(candidates,(a,b)->Integer.compare(b.box.centerY(),a.box.centerY()));Line buy=candidates.get(0);
                 if(stalls>=5){log("WAIT","Station unchanged after taps; moving on");close(s);return;}
                 act(buy.box.centerX(),buy.box.centerY(),"STATION_UPGRADE",false);return;
             }
-            if(prefs().getBoolean("autoUpgrade",false)&&stalls<3){act(w*prefs().getInt("x",50)/100,h*prefs().getInt("y",75)/100,"FALLBACK_STATION",false);return;}
+            if(prefs().getBoolean("autoUpgrade",false)){logOccasionally("Fallback station tapping disabled in verified mode");}
             logOccasionally("Station panel but no validated coin button");return;
         }
         // Unlock station: text inside an active button, not a guessed offset.
@@ -148,10 +179,14 @@ public class TapService extends AccessibilityService {
         if(System.currentTimeMillis()-lastGesture<850){schedule(1000);return;}
         if(x<0||x>=w||y<0||y>=h||ex<0||ex>=w||ey<0||ey>=h)return;
         awaiting=true;lastGesture=System.currentTimeMillis();lastAction=reason;lastX=x;lastY=y;
+        if(!one && !reason.contains("SCROLL") && !reason.equals("CLOSE")){
+            pendingVerification=true;pendingPhase=reason;pendingText=previous;pendingLevel=stationLevel(previous);
+            // fingerprint is captured in decide() before dispatch.
+        }
         Path path=new Path();path.moveTo(x,y);if(x!=ex||y!=ey)path.lineTo(ex,ey);
         GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,duration);
         boolean ok=dispatchGesture(new GestureDescription.Builder().addStroke(stroke).build(),new GestureResultCallback(){
-            @Override public void onCompleted(GestureDescription g){awaiting=false;taps++;log("ACTION",reason+" #"+taps+" ("+x+","+y+") -> ("+ex+","+ey+") Android completed; game result not yet verified");if(one)stop("One-tap test done");else schedule(reason.equals("RENOVATE")?5000:prefs().getInt("interval",1500));}
+            @Override public void onCompleted(GestureDescription g){awaiting=false;taps++;log("ACTION",reason+" #"+taps+" ("+x+","+y+") -> ("+ex+","+ey+") Android completed; checking next screenshot");if(one)stop("One-tap test done");else schedule(reason.equals("RENOVATE")?5000:prefs().getInt("interval",1500));}
             @Override public void onCancelled(GestureDescription g){awaiting=false;log("ERROR","Gesture cancelled "+reason);if(one)stop("Test cancelled");else schedule(2000);}
         },handler);
         if(!ok){awaiting=false;log("ERROR","Gesture rejected "+reason);if(one)stop("Test rejected");else schedule(2000);}
