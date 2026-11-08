@@ -1,7 +1,30 @@
-plugins { id 'com.android.application' }
-android { namespace 'com.adventureoracle.bot'; compileSdk 35
-    defaultConfig { applicationId 'com.adventureoracle.bot'; minSdk 26; targetSdk 28; versionCode 5; versionName '0.5-beta' }
+
+plugins {
+    id 'com.android.application'
 }
 
-dependencies { implementation "androidx.core:core:1.12.0"
-    implementation "com.google.mlkit:text-recognition:16.0.1" }
+android {
+    namespace 'com.adventureoracle.bot'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.adventureoracle.bot'
+        minSdk 26
+        targetSdk 28
+        versionCode 5
+        versionName '0.5-beta'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.12.0'
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+}
+
+configurations.configureEach {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}
