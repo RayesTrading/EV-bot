@@ -13,7 +13,8 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout layout;
     private EditText pkg, x, y, interval, limit;
-    private CheckBox autoUpgrade;
+    private CheckBox autoUpgrade, mainUpgrades, autoRenovate;
+    private Spinner strategy, speed;
     private TextView status, diagnostics;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -22,8 +23,23 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); layout.setPadding(28,28,28,28);
         scroll.addView(layout); setContentView(scroll);
-        title("Adventure Oracle Bot — Verified Actions 0.7");
-        note("TCL 10 Pro testing. OCR + visual button detection: stations, upgrades, unlock, renovate and city transitions. Experimental: supervise and use STOP if it misidentifies a screen.");
+        title("Adventure Oracle Bot — Strategy Controls 0.8");
+        note("v0.8 experimental strategies. Choose the strategy and speed before starting. To change them, stop the bot, edit and save, then restart. Supervise early tests.");
+        note("GAMEPLAY STRATEGY — selectable in the app");
+        strategy = new Spinner(this);
+        String[] strategies = {"Sequential", "First & Last", "Balanced", "Adaptive"};
+        strategy.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, strategies));
+        strategy.setSelection(Math.max(0, Math.min(3, prefs.getInt("strategy",1))));
+        layout.addView(strategy);
+        note("UPGRADE SPEED — short / medium / longer holds");
+        speed = new Spinner(this);
+        String[] speeds = {"Normal", "Fast", "Turbo"};
+        speed.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, speeds));
+        speed.setSelection(Math.max(0, Math.min(2, prefs.getInt("speed",1))));
+        layout.addView(speed);
+        mainUpgrades = new CheckBox(this);mainUpgrades.setText("Buy affordable main upgrades automatically");mainUpgrades.setChecked(prefs.getBoolean("mainUpgrades",true));layout.addView(mainUpgrades);
+        autoRenovate = new CheckBox(this);autoRenovate.setText("Allow auto-renovation ONLY after verified completion");autoRenovate.setChecked(prefs.getBoolean("autoRenovate",false));layout.addView(autoRenovate);
+        note("Auto-renovation starts OFF for safety: detecting every MAX station reliably is not yet validated. The bot will not renovate merely because a blue button appears.");
         pkg = field("Eatventure package name", prefs.getString("package", "com.hwqgrhhjfd.idlefastfood"));
         x = field("Fallback tap X (% of screen width, 0–100)", String.valueOf(prefs.getInt("x",50)));
         y = field("Fallback tap Y (% of screen height, 0–100)", String.valueOf(prefs.getInt("y",75)));
@@ -52,7 +68,7 @@ public class MainActivity extends Activity {
         button("Share full debug report", this::shareLog);
         button("Copy report text", () -> { android.content.ClipboardManager cb = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE); cb.setPrimaryClip(android.content.ClipData.newPlainText("Adventure Oracle debug", BotLog.read(this))); Toast.makeText(this,"Copied",Toast.LENGTH_SHORT).show(); });
         diagnostics = new TextView(this); diagnostics.setTextSize(12); diagnostics.setTextIsSelectable(true); diagnostics.setPadding(0,16,0,16); layout.addView(diagnostics);
-        note("Alpha 0.7 verifies actions and pauses after repeated unconfirmed gestures. Station upgrades, ordinary coin upgrades, unlock, renovate and welcome are attempted when confidently identified. No ads, gems or real-money purchases. Fallback X/Y is optional.");
+        note("Alpha 0.8 verifies actions and pauses after repeated unconfirmed gestures. Station upgrades, ordinary coin upgrades, unlock, renovate and welcome are attempted when confidently identified. No ads, gems or real-money purchases. Fallback X/Y is optional.");
         refreshDiagnostics();
     }
     private void title(String s) { TextView t = new TextView(this); t.setText(s); t.setTextSize(22); t.setPadding(0,8,0,16); layout.addView(t); }
@@ -81,8 +97,8 @@ public class MainActivity extends Activity {
             int ms = Integer.parseInt(interval.getText().toString().trim()), max = Integer.parseInt(limit.getText().toString().trim());
             String packageName = pkg.getText().toString().trim();
             if (xx < 0 || xx > 100 || yy < 0 || yy > 100 || ms < 500 || ms > 10000 || max < 1 || max > 500 || packageName.isEmpty()) throw new IllegalArgumentException("Invalid setting range");
-            prefs.edit().putInt("x",xx).putInt("y",yy).putInt("interval",ms).putInt("limit",max).putString("package",packageName).putBoolean("autoUpgrade",autoUpgrade.isChecked()).apply();
-            BotLog.write(this,"INFO","Settings saved: package="+packageName+", x="+xx+"%, y="+yy+"%, interval="+ms+"ms, limit="+max);
+            prefs.edit().putInt("strategy",strategy.getSelectedItemPosition()).putInt("speed",speed.getSelectedItemPosition()).putBoolean("mainUpgrades",mainUpgrades.isChecked()).putBoolean("autoRenovate",autoRenovate.isChecked()).putInt("x",xx).putInt("y",yy).putInt("interval",ms).putInt("limit",max).putString("package",packageName).putBoolean("autoUpgrade",autoUpgrade.isChecked()).apply();
+            BotLog.write(this,"INFO","Settings saved: package="+packageName+", x="+xx+"%, y="+yy+"%, interval="+ms+"ms, limit="+max+", strategy="+strategy.getSelectedItem()+", speed="+speed.getSelectedItem()+", mainUpgrades="+mainUpgrades.isChecked()+", autoRenovate="+autoRenovate.isChecked());
             Toast.makeText(this,"Saved",Toast.LENGTH_SHORT).show(); return true;
         } catch (Exception e) { BotLog.write(this,"ERROR","Invalid settings: " + e.getMessage()); showStatus("ERROR: Check numeric settings and allowed ranges."); return false; }
     }
